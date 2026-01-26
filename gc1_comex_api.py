@@ -92,6 +92,8 @@ def main():
             => /ohlcv_4h<br>
             => /ohlcv_d<br>
             => /ohlcv_w<br>
+            => /emas954_5m<br>
+            => /emas954_15m<br>
             => /emas954_1h<br>
             => /emas954_4h<br>
             => /emas954_d<br>
@@ -174,6 +176,22 @@ def main():
             logger.error(f"ERROR EN emas954_1h(): {e}")
             return flask.Response("ERROR INTERNO DEL SERVIDOR", status=500)
 
+    @app.route("/emas954_15m")
+    def emas954_15m():
+        try:
+            return emas954(symbol=SYMBOL, exchange=EXCHANGE, interval=Interval.in_15_minute, n_bars=5000)
+        except Exception as e:
+            logger.error(f"ERROR EN emas954_15m(): {e}")
+            return flask.Response("ERROR INTERNO DEL SERVIDOR", status=500)
+
+    @app.route("/emas954_5m")
+    def emas954_5m():
+        try:
+            return emas954(symbol=SYMBOL, exchange=EXCHANGE, interval=Interval.in_5_minute, n_bars=5000)
+        except Exception as e:
+            logger.error(f"ERROR EN emas954_5m(): {e}")
+            return flask.Response("ERROR INTERNO DEL SERVIDOR", status=500)
+
     app.run(host="0.0.0.0", port=80, debug=True)
     # -------------------------------------------
 # ---------------
@@ -210,3 +228,4 @@ if __name__ == "__main__":
     # -------------------------------------------------
     main()
     # -------------------------------------------------
+
