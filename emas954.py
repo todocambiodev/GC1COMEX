@@ -1,7 +1,7 @@
 # Importar librerias
 #  -----------------------------------------------
 try:
-    import pandas_ta as talib, sys, requests, datetime, asyncio, time, requests
+    import pandas_ta as talib, sys, requests, datetime, asyncio, time
     from tvDatafeed import TvDatafeed, Interval
 except Exception as e:
     print(f"ERROR IMPORTANDO LIBRERIAS: {e}")
@@ -43,14 +43,14 @@ def enviar_datos(symbol, url, emas954_1m, emas954_5m, emas954_15m, emas954_1h, e
                 "emas954_4h": emas954_4h,
                 "emas954_1d": emas954_d,
                 "emas954_w": emas954_w}
+        print(params)
         r = requests.post(url=url, params=params)
         if r.status_code == 200:
             print(r.text)
-            #logger.info(f"EMA954_1m: {emas954_1m}, EMA954_5m: {emas954_5m}, EMA954_15m: {emas954_15m}, EMA954_1h: {emas954_1h}, EMA954_4h: {emas954_4h}, EMA954_D: {emas954_d}, EMA954_w: {emas954_w}")
         else:
             print(f"ERROR ENVIANDO DATOS DE {symbol} AL GSHEETS. STATUS CODE: {r.status_code}" )
     except Exception as e:
-        print("ERROR EN enviar_datos()")
+        print(f"ERROR EN enviar_datos() - {e}")
 #  -----------------------------------------------
 
 # Enviar datos de EMAs 954 al GSheets
@@ -61,8 +61,8 @@ async def main():
     tv = TvDatafeed()
 
     # Variables iniciales
-    symbol = "GC1!"
-    exchange = "COMEX"
+    symbol = SYMBOL
+    exchange = EXCHANGE
     emas954_1m = ""
     emas954_5m = ""
     emas954_15m = ""
@@ -71,9 +71,9 @@ async def main():
     emas954_d = ""
     emas954_w = ""
     ciclo = 0
-    ciclo_final = 63
-    url_enviar_datos="https://script.google.com/macros/s/AKfycbyJyyN7WFPtao1u_y8jgwsaKVYf2j8TL4vtg-Xe3kAotmBsUAEyFFjt2K-NgHauYxJjHw/exec"
-    url_disparar_github_actions = "https://script.google.com/macros/s/AKfycbyJyyN7WFPtao1u_y8jgwsaKVYf2j8TL4vtg-Xe3kAotmBsUAEyFFjt2K-NgHauYxJjHw/exec"
+    ciclo_final = CICLO_FINAL
+    url_enviar_datos = URL_ENVIAR_DATOS
+    url_disparar_github_actions = URL_DISPARAR_GITHUB_ACTIONS
     
     while True:
         try:
@@ -134,6 +134,15 @@ async def main():
 
 
 if __name__ == "__main__":
+
+    # Variables iniciales
+    # -------------------
+    SYMBOL: str = "GOLD"
+    EXCHANGE: str = "TVC"
+    URL_ENVIAR_DATOS: str = "https://script.google.com/macros/s/AKfycbyJyyN7WFPtao1u_y8jgwsaKVYf2j8TL4vtg-Xe3kAotmBsUAEyFFjt2K-NgHauYxJjHw/exec"
+    URL_DISPARAR_GITHUB_ACTIONS: str = "https://script.google.com/macros/s/AKfycbyJyyN7WFPtao1u_y8jgwsaKVYf2j8TL4vtg-Xe3kAotmBsUAEyFFjt2K-NgHauYxJjHw/exec"
+    CICLO_FINAL: int = 63
+    # -------------------
     
     # Ejecutar el programa principal
     # -----------------------------------------------
