@@ -41,7 +41,7 @@ def enviar_datos(symbol, url, emas954_1m, emas954_5m, emas954_15m, emas954_1h, e
                 "emas954_15m": emas954_15m, 
                 "emas954_1h": emas954_1h,
                 "emas954_4h": emas954_4h,
-                "emas954_1d": emas954_d,
+                "emas954_d": emas954_d,
                 "emas954_w": emas954_w}
         print(params)
         r = requests.post(url=url, params=params)
