@@ -1,0 +1,17 @@
+{
+  "name": "tradingview_ws",
+  "version": "1.0.0",
+  "main": "tv_ws.js",
+  "type": "module",
+  "scripts": {
+    "start": "node tv_ws.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "playwright": "^1.57.0",
+    "ws": "^8.19.0"
+  }
+}
