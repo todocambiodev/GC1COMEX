@@ -2,7 +2,7 @@ name: Disparador EMAs 954
 
 on:
   repository_dispatch:
-    types: [disparador]
+    types: [emas954]
   workflow_dispatch: # Permite ejecutarlo manualmente para probar
 
 jobs:
