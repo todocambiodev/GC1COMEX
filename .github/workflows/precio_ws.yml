@@ -1,0 +1,30 @@
+name: Obtener precio GC1!COMEX WS
+
+on:
+  workflow_dispatch: # Permite ejecutarlo manualmente para probar
+  repository_dispatch:
+    types: [precio_ws]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar NodeJS
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar dependencias
+        run: |
+          npm init -y
+          npm install
+      
+      - name: Instalar navegadores de Playwright
+        run: npx playwright install chromium --with-deps
+      
+      - name: Ejecutar script
+        run: node precio_ws.js
