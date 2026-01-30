@@ -2,6 +2,8 @@ name: Emas 954 Multisymbols
 
 on: 
   workflow_dispatch: # Disparar manualmente
+  repository_dispatch:
+    types: [multiemas954]
 
 jobs:
   build:
