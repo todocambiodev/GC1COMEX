@@ -119,7 +119,7 @@ async def main():
             if ciclo >= ciclo_final:
                 print(f"Ciclo final {ciclo} alcanzado. Fin del programa.")
                 await asyncio.sleep(3.6)
-                r = requests.get(url_disparar_github_actions, params={"disparar": symbol})
+                r = requests.get(url_disparar_github_actions, params={"disparar": "emas954})
                 if r.status_code == 200:
                     print(r.text)
                 else:
@@ -141,7 +141,7 @@ if __name__ == "__main__":
     EXCHANGE: str = "TVC"
     URL_ENVIAR_DATOS: str = "https://script.google.com/macros/s/AKfycbyJyyN7WFPtao1u_y8jgwsaKVYf2j8TL4vtg-Xe3kAotmBsUAEyFFjt2K-NgHauYxJjHw/exec"
     URL_DISPARAR_GITHUB_ACTIONS: str = "https://script.google.com/macros/s/AKfycbyJyyN7WFPtao1u_y8jgwsaKVYf2j8TL4vtg-Xe3kAotmBsUAEyFFjt2K-NgHauYxJjHw/exec"
-    CICLO_FINAL: int = 36
+    CICLO_FINAL: int = 18
     # -------------------
     
     # Ejecutar el programa principal
