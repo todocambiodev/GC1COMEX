@@ -118,12 +118,6 @@ async def main():
             print(f"Ciclo {ciclo} completado.")
             if ciclo >= ciclo_final:
                 print(f"Ciclo final {ciclo} alcanzado. Fin del programa.")
-                await asyncio.sleep(3.6)
-                r = requests.get(url_disparar_github_actions, params={"disparar": "emas954})
-                if r.status_code == 200:
-                    print(r.text)
-                else:
-                    print(f"ERROR DISPARANDO GITHUB ACTIONS DE {symbol}. STATUS CODE: {r.status_code}" )
                 break
 
         except Exception as e:
