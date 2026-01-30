@@ -141,7 +141,7 @@ if __name__ == "__main__":
     EXCHANGE: str = "TVC"
     URL_ENVIAR_DATOS: str = "https://script.google.com/macros/s/AKfycbyJyyN7WFPtao1u_y8jgwsaKVYf2j8TL4vtg-Xe3kAotmBsUAEyFFjt2K-NgHauYxJjHw/exec"
     URL_DISPARAR_GITHUB_ACTIONS: str = "https://script.google.com/macros/s/AKfycbyJyyN7WFPtao1u_y8jgwsaKVYf2j8TL4vtg-Xe3kAotmBsUAEyFFjt2K-NgHauYxJjHw/exec"
-    CICLO_FINAL: int = 63
+    CICLO_FINAL: int = 36
     # -------------------
     
     # Ejecutar el programa principal
