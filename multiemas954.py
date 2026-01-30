@@ -141,12 +141,6 @@ if __name__ == "__main__":
     # -----------------------------------------------
     ti = datetime.datetime.now()
     asyncio.run(main())
-
-    r = requests.get(URL_DISPARAR_GITHUB_ACTIONS, params={"disparar": "multiemas954"})
-    if r.status_code == 200:
-        print(r.text)
-    else:
-        print(f"ERROR DISPARANDO GITHUB ACTIONS DE 'multiemas954'. STATUS CODE: {r.status_code}" )
-    
     print(f"Tiempo total: {datetime.datetime.now()-ti}")
     # -----------------------------------------------
+    
