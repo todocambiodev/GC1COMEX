@@ -55,14 +55,12 @@ def enviar_datos(symbol, url, emas954_1m, emas954_5m, emas954_15m, emas954_1h, e
 
 # Enviar datos de EMAs 954 al GSheets
 #  -----------------------------------------------
-async def main954(SYMBOL: str, EXCHANGE: str, URL_ENVIAR_DATOS: str, CICLO_FINAL: int):
+async def main954(symbol: str, exchange: str, urls: list[str], ciclo_final: int=0):
 
     # Definir una sesion para la API de Trading View
     tv = TvDatafeed()
 
     # Variables iniciales
-    symbol = SYMBOL
-    exchange = EXCHANGE
     emas954_1m = ""
     emas954_5m = ""
     emas954_15m = ""
@@ -71,8 +69,6 @@ async def main954(SYMBOL: str, EXCHANGE: str, URL_ENVIAR_DATOS: str, CICLO_FINAL
     emas954_d = ""
     emas954_w = ""
     ciclo = 0
-    ciclo_final = CICLO_FINAL
-    url_enviar_datos = URL_ENVIAR_DATOS
     
     while True:
         try:
@@ -106,7 +102,8 @@ async def main954(SYMBOL: str, EXCHANGE: str, URL_ENVIAR_DATOS: str, CICLO_FINAL
                 emas954_4h = emas954_4h_actual if emas954_4h_actual != "" else emas954_4h
                 emas954_d = emas954_d_actual if emas954_d_actual != "" else emas954_d
                 emas954_w = emas954_w_actual if emas954_w_actual != "" else emas954_w
-                enviar_datos(symbol, url_enviar_datos, emas954_1m, emas954_5m, emas954_15m, emas954_1h, emas954_4h, emas954_d, emas954_w)
+                for url in urls:
+                    enviar_datos(symbol, url, emas954_1m, emas954_5m, emas954_15m, emas954_1h, emas954_4h, emas954_d, emas954_w)
             
             ciclo += 1
             print(f"Ciclo {ciclo} del {symbol} completado.")
@@ -125,7 +122,7 @@ async def main954(SYMBOL: str, EXCHANGE: str, URL_ENVIAR_DATOS: str, CICLO_FINAL
 async def main():
     tareas = []
     for i in range(len(SYMBOL)):
-        tareas.append(main954(SYMBOL[i], EXCHANGE[i], URL_ENVIAR_DATOS, CICLO_FINAL))
+        tareas.append(main954(SYMBOL[i], EXCHANGE[i], [URL_ENVIAR_DATOS], CICLO_FINAL))
     await asyncio.gather(*tareas)
 #  -----------------------------------------------
 
@@ -137,7 +134,7 @@ if __name__ == "__main__":
     EXCHANGE: str = ["TVC", "VANTAGE", "TVC", "CBOT", "CBOT", "TVC", "TVC"]
     URL_ENVIAR_DATOS: str = "https://script.google.com/macros/s/AKfycbyJyyN7WFPtao1u_y8jgwsaKVYf2j8TL4vtg-Xe3kAotmBsUAEyFFjt2K-NgHauYxJjHw/exec"
     URL_DISPARAR_GITHUB_ACTIONS: str = "https://script.google.com/macros/s/AKfycbyJyyN7WFPtao1u_y8jgwsaKVYf2j8TL4vtg-Xe3kAotmBsUAEyFFjt2K-NgHauYxJjHw/exec"
-    CICLO_FINAL: int = 54
+    CICLO_FINAL: int = 18
     # -------------------
     
     # Ejecutar el programa principal
