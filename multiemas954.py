@@ -137,7 +137,7 @@ if __name__ == "__main__":
     EXCHANGE: str = ["TVC", "VANTAGE", "TVC", "CBOT", "CBOT", "TVC", "TVC"]
     URL_ENVIAR_DATOS: str = "https://script.google.com/macros/s/AKfycbyJyyN7WFPtao1u_y8jgwsaKVYf2j8TL4vtg-Xe3kAotmBsUAEyFFjt2K-NgHauYxJjHw/exec"
     URL_DISPARAR_GITHUB_ACTIONS: str = "https://script.google.com/macros/s/AKfycbyJyyN7WFPtao1u_y8jgwsaKVYf2j8TL4vtg-Xe3kAotmBsUAEyFFjt2K-NgHauYxJjHw/exec"
-    CICLO_FINAL: int = 63
+    CICLO_FINAL: int = 3
     # -------------------
     
     # Ejecutar el programa principal
@@ -145,11 +145,11 @@ if __name__ == "__main__":
     ti = datetime.datetime.now()
     asyncio.run(main())
 
-    r = requests.get(URL_DISPARAR_GITHUB_ACTIONS, params={"disparar": "emas954_multisymbols"})
+    r = requests.get(URL_DISPARAR_GITHUB_ACTIONS, params={"disparar": "multiemas954"})
     if r.status_code == 200:
         print(r.text)
     else:
-        print(f"ERROR DISPARANDO GITHUB ACTIONS DE 'emas954_multisymbols'. STATUS CODE: {r.status_code}" )
+        print(f"ERROR DISPARANDO GITHUB ACTIONS DE 'multiemas954'. STATUS CODE: {r.status_code}" )
     
     print(f"Tiempo total: {datetime.datetime.now()-ti}")
     # -----------------------------------------------
