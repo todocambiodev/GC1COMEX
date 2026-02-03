@@ -121,8 +121,8 @@ async def main954(symbol: str, exchange: str, urls: list[str], ciclo_final: int=
 #  -----------------------------------------------
 async def main():
     tareas = []
-    for i in range(len(SYMBOL)):
-        tareas.append(main954(SYMBOL[i], EXCHANGE[i], [URL_ENVIAR_DATOS], CICLO_FINAL))
+    for symbol in SYMBOLS:
+        tareas.append(main954(symbol["symbol"], symbol["exchange"], [URL_ENVIAR_DATOS], CICLO_FINAL))
     await asyncio.gather(*tareas)
 #  -----------------------------------------------
 
@@ -130,11 +130,17 @@ if __name__ == "__main__":
 
     # Variables iniciales
     # -------------------
-    SYMBOL: str = ["DXY", "SP500FT", "VIX", "ZT1!", "ZN1!", "US02Y", "US10Y"]
-    EXCHANGE: str = ["TVC", "VANTAGE", "TVC", "CBOT", "CBOT", "TVC", "TVC"]
+    SYMBOLS: list[dict[str, str]] = [
+        {"symbol": "DXY", "exchange": "TVC"}, 
+        {"symbol": "SP500FT", "exchange": "VANTAGE"}, 
+        {"symbol": "VIX", "exchange": "TVC"}, 
+        {"symbol": "ZT1!", "exchange": "CBOT"}, 
+        {"symbol": "ZN1!", "exchange": "CBOT"}, 
+        {"symbol": "US02Y", "exchange": "TVC"}, 
+        {"symbol": "US10Y", "exchange": "TVC"}]
     URL_ENVIAR_DATOS: str = "https://script.google.com/macros/s/AKfycbyJyyN7WFPtao1u_y8jgwsaKVYf2j8TL4vtg-Xe3kAotmBsUAEyFFjt2K-NgHauYxJjHw/exec"
     URL_DISPARAR_GITHUB_ACTIONS: str = "https://script.google.com/macros/s/AKfycbyJyyN7WFPtao1u_y8jgwsaKVYf2j8TL4vtg-Xe3kAotmBsUAEyFFjt2K-NgHauYxJjHw/exec"
-    CICLO_FINAL: int = 36
+    CICLO_FINAL: int = 3
     # -------------------
     
     # Ejecutar el programa principal
