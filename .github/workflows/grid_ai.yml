@@ -1,0 +1,25 @@
+name: Grid Inteligente con IA
+
+on:
+  repository_dispatch:
+    types: [drid]
+  workflow_dispatch: # Permite ejecutarlo manualmente para probar
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Instalar dependencias
+        run: |
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Ejecutar script
+        run: python grid_ai.py
