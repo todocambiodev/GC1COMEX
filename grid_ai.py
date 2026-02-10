@@ -16,6 +16,7 @@ A partir de datos de velas OHLC que te voy a suminstrar eres capaz de detrminar:
 - La distancia entre niveles de grid debe ser un porcentaje sin el simbolo "%", de al menos 3 decimales donde la suma de todos los digitos del porcentaje debe ser 9. Debe tener al menos 3 numeros distintos de 0.
 - Dentro del rango detectado no pueden haber mas de 3 niveles.
 - El nivel de soporte y el nivel de resistencia pueden ser enteros y si puedes hacer que la sumaatoria de todos los digitos de 9 mucho mejor.
+- Si no hay un rango consolidado, devuelve una separacion olgada de manera que si el precio se mueve en cualquier direccion haya al menos un nivel de grid.
 Debes devolver un JSON con la siguiente estructura:
 {
     "symbol": "string",
