@@ -1,3 +1,8 @@
 tradingview-datafeed
 flask
 pandas_ta
+newsapi-python
+google-genai
+requests
+openai
+playwright
