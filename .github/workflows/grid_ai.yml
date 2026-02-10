@@ -2,7 +2,7 @@ name: Grid Inteligente con IA
 
 on:
   repository_dispatch:
-    types: [drid]
+    types: [grid]
   workflow_dispatch: # Permite ejecutarlo manualmente para probar
 
 jobs:
