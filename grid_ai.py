@@ -47,7 +47,7 @@ URL_GSHEETS = "https://script.google.com/macros/s/AKfycbyJyyN7WFPtao1u_y8jgwsaKV
 symbol:str = "GOLD"
 exchange:str = "TVC"
 intervalo:tvDatafeed.Interval = tvDatafeed.Interval.in_1_minute
-n_bars:int = 60
+n_bars:int = 126
 
 def obtener_datos_velas_ohlc(symbol:str, exchange:str, intervalo:tvDatafeed.Interval, n_bars:int):
     """
