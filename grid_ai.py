@@ -8,21 +8,20 @@ import tvDatafeed as tvDatafeed, pandas as pd, json, requests, time
 
 # Instrucciones detalladas para la IA. Define su rol y el formato de salida esperado.
 INSTRUCCIONES_IA = """
-Eres un gestor de fondos de inversiones genio en estrategias de scalping y grid trading.
+Eres un gestor senior de fondos de inversiones, analista tecnico profesional, genio en estrategias de scalping y grid trading.
 A partir de datos de velas OHLC que te voy a suminstrar eres capaz de detrminar:
 - El ultimo rango consolidado
-- La separacion porcentualmas eficiente entre niveles de grid para que el precio fluctue con gran probabilidad en al menos en un par de niveles (compra y venta), ojo con colocar muchos niveles o una separacion muy pequeña, no se deben abrir muchas posiciones dentro del rango, solo las necesarias para garantizar la eficiencia del grid.
-- El nivel de soporte mas eficiente y el nivel de resistencia mas eficiente.
-- La distancia entre niveles de grid debe ser un porcentaje sin el simbolo "%", de al menos 3 decimales donde la suma de todos los digitos del porcentaje debe ser 9. Debe tener al menos 3 numeros distintos de 0.
-- Dentro del rango detectado no pueden haber mas de 3 niveles.
-- El nivel de soporte y el nivel de resistencia pueden ser enteros y si puedes hacer que la sumaatoria de todos los digitos de 9 mucho mejor.
-- Si no hay un rango consolidado, devuelve una separacion olgada de manera que si el precio se mueve en cualquier direccion haya al menos un nivel de grid.
+- La separacion porcentualmas eficiente entre niveles del grid para que el precio fluctue con gran probabilidad en al menos en un par de niveles claves (compra y venta), ojo con colocar muchos niveles o una separacion muy pequeña, no se deben abrir muchas posiciones dentro del rango, solo las necesarias para garantizar la eficiencia del grid.
+- El nivel mas concurrido del rango consolidado.
+La distancia entre niveles del grid debe ser en porcentaje sin el simbolo "%", de al menos 3 decimales donde la suma de todos los digitos del porcentaje debe ser 9. Debe tener al menos 3 numeros distintos de 0.
+La separacion minima debe ser mayor o igual a 0.0999.
+Dentro del rango detectado no pueden haber mas de 3 niveles y como minimo 1 nivel.
+Si no hay un rango consolidado, devuelve una separacion olgada para evitar quedar muy cargados si el precio se viene en contra.
 Debes devolver un JSON con la siguiente estructura:
 {
     "symbol": "string",
     "separacion": "string",
-    "nivel_soporte": "string",
-    "nivel_resistencia": "string",
+    "nivel_clave: "string, nivel mas concurrido del rango consolidado",
     "mensaje": "Cualquiero cosa, mensaje u observaciones qie quieras decirme"
 }
 """
@@ -96,11 +95,10 @@ def consultar_ia(modelo:str, api_key:str, instrucciones:str, data:pd.DataFrame):
                 "properties": {
                     "symbol": {"type": "string"},
                     "separacion": {"type": "string"},
-                    "nivel_soporte": {"type": "string"},
-                    "nivel_resistencia": {"type": "string"},
+                    "nivel_clave": {"type": "string"},
                     "mensaje": {"type": "string"}
                 },
-                "required": ["symbol", "separacion", "nivel_soporte", "nivel_resistencia", "mensaje"]
+                "required": ["symbol", "separacion", "nivel_clave", "mensaje"]
             }
         )
     )
@@ -132,12 +130,11 @@ def enviar_analisis_a_gsheets(modelo:str, url:str, analisis:dict):
             "analisisGrid": analisis,
             "symbol": analisis["symbol"], 
             "separacion": analisis["separacion"], 
-            "nivelSoporte": analisis["nivel_soporte"], 
-            "nivelResistencia": analisis["nivel_resistencia"],
+            "nivelClave": analisis["nivel_clave"],
             "mensaje": analisis["mensaje"],
             "modelo": modelo
         }
-        print(f"Enviando analisis: {params['mensaje']}")
+        print(f"Enviando analisis...")
         
         # Realizamos la petición HTTP POST enviando la información
         r = requests.post(url=url, params=params)
@@ -159,13 +156,13 @@ def main():
     for api_key in GENAI_API_KEY:
         for modelo in MODELOS_IA:
             try:
-                print(f"Probando análisis con modelo: {modelo}...")
+                print(f"Analizando con modelo: {modelo}...")
                 
                 analisis_raw = analizar_rango_con_ia(modelo=modelo, api_key=api_key, symbol=symbol, exchange=exchange, intervalo=intervalo, n_bars=n_bars)
                 
                 # Si el análisis falla o la API devuelve un error 429 (Resource Exhausted), probamos el siguiente modelo/llave
                 if analisis_raw is None or "429" in analisis_raw:
-                    print(f"Fallo o cuota excedida para {modelo}. Reintentando con otro...")
+                    print(f"Falla en el análisis o cuota excedida para {modelo}. Reintentando con otro...")
                     continue
                 else :
                     # Si tenemos éxito, procesamos el JSON
@@ -180,9 +177,11 @@ def main():
                     return
             except Exception as e:
                 print(f"ERROR EN main() - ERROR: {e}")
-                print(f"Reintentando en 63 segundos...")
-                time.sleep(63) # Esperamos 63 segundos para evitar bloqueos por rate limit
-        
+
+    # Si llegamos aquí, significa que todos los modelos/llaves fallaron
+    print("Todos los modelos/llaves fallaron. Terminando el script.")
+    
 # Punto de entrada del script
 if __name__ == "__main__":
     main()
+    
