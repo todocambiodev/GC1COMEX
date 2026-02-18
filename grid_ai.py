@@ -1,6 +1,7 @@
 from google import genai
 from google.genai import types
-import tvDatafeed as tvDatafeed, pandas as pd, json, requests, time
+import tvDatafeed as tvDatafeed, pandas as pd, json, requests, os
+from dotenv import load_dotenv
 
 # =============================================================================
 # CONFIGURACIÓN Y CONSTANTES
@@ -16,7 +17,7 @@ A partir de datos de velas OHLC que te voy a suminstrar eres capaz de detrminar:
 La distancia entre niveles del grid debe ser en porcentaje sin el simbolo "%", de al menos 3 decimales donde la suma de todos los digitos del porcentaje debe ser 9. Debe tener al menos 3 numeros distintos de 0.
 La separacion minima debe ser mayor o igual a 0.0999.
 Dentro del rango detectado no pueden haber mas de 3 niveles y como minimo 1 nivel.
-Si no hay un rango consolidado, o hay una volatilidad muy fuerte devuelve una separacion amplia para evitar quedar con muchas posiciones si el precio se viene en contra.
+Si no hay un rango consolidado, devuelve una separacion olgada para evitar quedar muy cargados si el precio se viene en contra.
 Debes devolver un JSON con la siguiente estructura:
 {
     "symbol": "string",
@@ -34,10 +35,11 @@ MODELOS_IA = [
 ]
 
 # Claves de API de Google GenAI para manejar límites de cuota (Rate Limiting).
+load_dotenv()
 GENAI_API_KEY = [
-    "AIzaSyDxtM2-NpHG9PAd9bWGwCAascCYVT2wYCA", 
-    "AIzaSyCbrcm3NLjc1Qo3By7bGt2mJ8zu_Kw5swo", 
-    "AIzaSyAIWNvwgdCbMl08geCLa1iwona04s2Ri74"
+    os.getenv("GENAI_API_KEY_1"), 
+    os.getenv("GENAI_API_KEY_2"), 
+    os.getenv("GENAI_API_KEY_3")
 ]
 
 # URL del Web App de Google Apps Script para registrar los análisis en una hoja de cálculo.
@@ -184,4 +186,3 @@ def main():
 # Punto de entrada del script
 if __name__ == "__main__":
     main()
-    
