@@ -6,3 +6,4 @@ google-genai
 requests
 openai
 playwright
+python-dotenv
