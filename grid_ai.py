@@ -1,6 +1,6 @@
 from google import genai
 from google.genai import types
-import tvDatafeed as tvDatafeed, pandas as pd, json, requests, os
+import tvDatafeed as tvDatafeed, pandas as pd, json, requests, os, datetime
 from dotenv import load_dotenv
 
 # =============================================================================
@@ -142,7 +142,7 @@ def enviar_analisis_a_gsheets(modelo:str, url:str, analisis:dict):
         r = requests.post(url=url, params=params)
         
         if r.status_code == 200:
-            print(f"Respuesta GSheets: {r.text}")
+            print(f"Respuesta GSheets: {r.text} {datetime.datetime.now()}")
         else:
             print(f"ERROR ENVIANDO ANALISIS AL GSHEETS. STATUS CODE: {r.status_code}")
             
