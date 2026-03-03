@@ -158,7 +158,7 @@ let sopActuales = []
 let resActuales = []
 const factor = 1.00126
 const minutosParaRecargarSR = 1
-const cicloFinal = 108
+const cicloFinal = 54
 let cicloActual = 0
 let precio = ""
 // ---------------------
