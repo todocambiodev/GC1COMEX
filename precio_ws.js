@@ -2,56 +2,63 @@ import { chromium } from "playwright"
 
 // Funciones principales:
 // ---------------------
-async function precioTVws(simboloDeseado) {
-
-    const browser = await chromium.launch({ headless: true })
-    const page = await browser.newPage()
-
-    page.on("websocket", (ws) => {
-        ws.on("framereceived", async (frame) => {
-            // Usamos una RegEx dinámica para el símbolo que elegimos
-            const regex = new RegExp(`"${simboloDeseado}"[^}]*?"lp":(\\d+\\.?\\d*)`); // [^}]* -> Significa "cualquier carácter que NO sea una llave de cierre"
-            const match = frame.payload.match(regex);
-
-            if (match) {
-                //console.log(match[0]);
-                const symbol = match[0].split(",")[0].replaceAll('"', "");
-                const precio = match[1];
-                console.log(`✅ ${symbol}: ${precio} - (${new Date().toLocaleString()})`);
-                await verificarSR(precio)
-            }
-        })
-
-        ws.on("close", async () => {
-            try {
-                console.log("Websocket cerrado. Recargando página...")
-                if (browser.isConnected()) {
-                    page.reload({ waitUntil: "load" })
-                } else {
-                    console.log("Abriendo la pagina de tradinview...")
-                    await page.goto("https://www.tradingview.com/chart/", { waitUntil: "load" })
-                    await page.keyboard.type(simboloDeseado)
-                    await page.keyboard.press("Enter")
-                }
-            } catch (error) {
-                console.log("Error al recargar la página", error)
-                console.log("Abriendo la pagina de tradinview...")
-                await page.goto("https://www.tradingview.com/chart/", { waitUntil: "load" })
-                await page.keyboard.type(simboloDeseado)
-                await page.keyboard.press("Enter")
-            }
-        })
-    })
-
+async function precioRealTime() {
+    const url = "https://www.investing.com/commodities/gold";
+    const priceSelector = '[data-test="instrument-price-last"]';
     while (true) {
+        console.log(`\n[${new Date().toLocaleTimeString()}] Iniciando nueva sesión del navegador...`);
+        let browser;
         try {
-            console.log("Abriendo la pagina de tradinview...")
-            await page.goto("https://www.tradingview.com/chart/", { waitUntil: "load" })
-            await page.keyboard.type(simboloDeseado)
-            await page.keyboard.press("Enter")
-            break
+            browser = await chromium.launch({ headless: true });
+            const context = await browser.newContext({
+                userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                viewport: { width: 1280, height: 720 }
+            });
+            const page = await context.newPage();
+
+            // Exponer función para recibir actualizaciones desde el navegador
+            await page.exposeFunction('onPriceChange', (newPrice) => {
+                console.log(`✅ [${new Date().toLocaleTimeString()}] Oro: ${newPrice}`);
+                verificarSR(newPrice);
+                precio = newPrice.replace(",", "");
+            });
+
+            console.log(`Navegando a ${url}...`);
+            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 63000 });
+
+            console.log("Esperando selector de precio...");
+            await page.waitForSelector(priceSelector, { timeout: 15000 });
+
+            const initialPrice = await page.textContent(priceSelector);
+            console.log(`Precio inicial encontrado: ${initialPrice}`);
+            console.log("Escuchando cambios en tiempo real (MutationObserver activo)...");
+
+            // Inyectar MutationObserver en la página
+            await page.evaluate((selector) => {
+                const targetNode = document.querySelector(selector);
+                if (!targetNode) return;
+
+                const observer = new MutationObserver(() => {
+                    const price = targetNode.textContent.trim();
+                    window.onPriceChange(price);
+                });
+
+                observer.observe(targetNode, {
+                    characterData: true,
+                    childList: true,
+                    subtree: true
+                });
+            }, priceSelector);
+
+            // Mantener la página abierta indefinidamente. 
+            // Si el navegador se cierra o falla, el catch reiniciará el loop.
+            await page.waitForEvent('close', { timeout: 0 });
+
         } catch (error) {
-            console.log("Error al cargar la página", error)
+            console.error(`⚠️ [Error]: ${error.message}`);
+            console.log("Reintentando en 10 segundos...");
+            if (browser) await browser.close().catch(() => { });
+            await new Promise(resolve => setTimeout(resolve, 10000));
         }
     }
 }
@@ -73,6 +80,7 @@ async function obtenerSR(sr) {
 async function verificarSR(precio) {
 
     // Verificamos soportes
+    precio = precio.replace(",", "")
     let sopActivosNuevos = []
     for (const soporte of soportes) {
         if (Number(soporte[1]) / factor <= Number(precio) && Number(precio) <= Number(soporte[1]) * factor) {
@@ -124,16 +132,17 @@ async function enviarPrecio(url, precio) {
 async function main() {
 
     Promise.all([
-        precioTVws(symbol),
+        precioRealTime(),
         obtenerSR("sr")
     ])
 
     // Volver a cargar los datos:
     setInterval(async () => {
         await obtenerSR("sr")
+        if (precio != "") await enviarPrecio(url, precio)
         cicloActual++
         if (cicloActual >= cicloFinal) {
-            console.log("✅ Proceso finalizado. Disparando GitHub Actions...")
+            console.log("✅ Proceso finalizado.")
             process.exit()
         }
     }, minutosParaRecargarSR * 60 * 1000)
@@ -142,7 +151,6 @@ async function main() {
 
 // Variables globales:
 // ---------------------
-const symbol = "TVC:GOLD"
 let url = "https://script.google.com/macros/s/AKfycbyJyyN7WFPtao1u_y8jgwsaKVYf2j8TL4vtg-Xe3kAotmBsUAEyFFjt2K-NgHauYxJjHw/exec"
 let soportes = []
 let resistencias = []
@@ -150,8 +158,9 @@ let sopActuales = []
 let resActuales = []
 const factor = 1.00126
 const minutosParaRecargarSR = 1
-const cicloFinal = 18
+const cicloFinal = 108
 let cicloActual = 0
+let precio = ""
 // ---------------------
 
 // Funciones principales:
