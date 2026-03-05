@@ -1,10 +1,11 @@
 import logging
+import asyncio
 import time
 import re
 import pandas as pd
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
-from curl_cffi import requests
+from playwright.async_api import async_playwright
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
@@ -31,80 +32,61 @@ class Interval:
 
 class InvestingDatafeed:
     def __init__(self):
-        self.session = None
-        self.headers = {}
         self.tvc_host = None
         self.carrier = None
         self.time_val = None
         self.domain_id = "1"
         self.lang_id = "1"
         self.timezone_id = "8"
-        self._init_session()
+        self._loop = asyncio.new_event_loop()
+        self._loop.run_until_complete(self._init_session_async())
 
-    def _init_session(self):
-        # Opciones de navegadores para burlar Cloudflare en servidores (Data Centers / Render / Github)
-        # Es clave dejar que curl_cffi asigne el User-Agent automáticamente para que coincida con la huella TLS.
-        impersonate_targets = ["chrome120", "chrome110", "safari15_5", "safari15_3", "edge101", "edge99"]
-        
+    async def _init_session_async(self):
         url = "https://www.investing.com/commodities/gold-streaming-chart"
+        logger.info("Iniciando Playwright para evadir Cloudflare y extraer tokens UDF...")
         
-        for target in impersonate_targets:
-            try:
-                # Creamos una sesión nueva para cada intento
-                self.session = requests.Session(impersonate=target)
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=True, 
+                    args=["--disable-blink-features=AutomationControlled"]
+                )
+                context = await browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                )
+                page = await context.new_page()
                 
-                # Solo añadimos Referer. ¡NO forzar el User-Agent! curl_cffi lo pondrá automático para emparejar el TLS.
-                self.headers = {
-                    "Referer": "https://www.investing.com/"
-                }
+                await page.goto(url, wait_until="domcontentloaded")
+                await page.wait_for_timeout(3000)
                 
-                logger.info(f"Probando conexión con Investing.com usando perfil: {target}...")
-                res = self.session.get(url, headers=self.headers, timeout=15)
+                html = await page.content()
+                tvc_matches = re.findall(r'https://tvc[^"\']*', html)
                 
-                if res.status_code == 200:
-                    html = res.text
-                    tvc_matches = re.findall(r'https://tvc[^"\']*', html)
-                    if tvc_matches:
-                        tvc_url = tvc_matches[0].replace('&amp;', '&')
-                        parsed = urlparse(tvc_url)
-                        qs = parse_qs(parsed.query)
-                        
-                        self.tvc_host = f"{parsed.scheme}://{parsed.netloc}"
-                        self.carrier = qs.get("carrier", [""])[0]
-                        self.time_val = qs.get("time", [""])[0]
-                        self.domain_id = qs.get("domain_ID", ["1"])[0]
-                        self.lang_id = qs.get("lang_ID", ["1"])[0]
-                        self.timezone_id = qs.get("timezone_ID", ["8"])[0]
-                        logger.info(f"InvestingDatafeed sesión UDF iniciada exitosamente con perfil {target}.")
-                        return # Éxito, salimos del bucle
-                    else:
-                        logger.warning(f"Perfil {target} conectó pero no extrajo TVC URL. Posible Captcha.")
-                else:
-                    logger.warning(f"Error {res.status_code} al inicializar sesión con {target}. Reintentando...")
+                if tvc_matches:
+                    tvc_url = tvc_matches[0].replace('&amp;', '&')
+                    parsed = urlparse(tvc_url)
+                    qs = parse_qs(parsed.query)
                     
-            except Exception as e:
-                logger.warning(f"Excepción inicializando sesión con {target}: {e}")
+                    self.tvc_host = f"{parsed.scheme}://{parsed.netloc}"
+                    self.carrier = qs.get("carrier", [""])[0]
+                    self.time_val = qs.get("time", [""])[0]
+                    self.domain_id = qs.get("domain_ID", ["1"])[0]
+                    self.lang_id = qs.get("lang_ID", ["1"])[0]
+                    self.timezone_id = qs.get("timezone_ID", ["8"])[0]
+                    logger.info("InvestingDatafeed sesión UDF iniciada exitosamente con Playwright.")
+                else:
+                    logger.warning("No se pudo extraer el token UDF. Posible bloqueo o Captcha visible.")
                 
-            time.sleep(1.5) # Pausa entre intentos
-            
-        logger.error("No se pudo iniciar sesión en Investing.com después de intentar todos los perfiles TLS disponibles. Block 403 persistente.")
+                await browser.close()
+        except Exception as e:
+            logger.error(f"Excepción en _init_session_async: {e}")
 
     def _map_interval(self, interval):
-        # Mapear intervalos de tvDatafeed a resoluciones UDF de Investing.com
         mapping = {
-            Interval.in_1_minute: "1",
-            Interval.in_3_minute: "3",
-            Interval.in_5_minute: "5",
-            Interval.in_15_minute: "15",
-            Interval.in_30_minute: "30",
-            Interval.in_45_minute: "45",
-            Interval.in_1_hour: "60",
-            Interval.in_2_hour: "120",
-            Interval.in_3_hour: "180",
-            Interval.in_4_hour: "240",
-            Interval.in_daily: "D",
-            Interval.in_weekly: "W",
-            Interval.in_monthly: "M",
+            Interval.in_1_minute: "1", Interval.in_3_minute: "3", Interval.in_5_minute: "5",
+            Interval.in_15_minute: "15", Interval.in_30_minute: "30", Interval.in_45_minute: "45",
+            Interval.in_1_hour: "60", Interval.in_2_hour: "120", Interval.in_3_hour: "180",
+            Interval.in_4_hour: "240", Interval.in_daily: "D", Interval.in_weekly: "W", Interval.in_monthly: "M"
         }
         return mapping.get(interval, "D")
 
@@ -116,37 +98,48 @@ class InvestingDatafeed:
         }
         udf_res = self._map_interval(interval)
         return mapping.get(udf_res, 2)
-
-    def get_hist(self, symbol="8830", exchange="COMEX", interval=Interval.in_daily, n_bars=100):
+        
+    async def _fetch_history_async(self, symbol, exchange, interval, n_bars):
         if not self.tvc_host or not self.carrier:
-            logger.error("La sesión UDF no se inicializó correctamente.")
+            logger.error("La sesión UDF no está lista.")
             return pd.DataFrame()
 
+        resolution = self._map_interval(interval)
+        to_time = int(time.time())
+        multiplier = self._get_multiplier_days(interval)
+        
+        if resolution in ["D", "W", "M"]:
+            days_back = int(n_bars * multiplier) + 10
+        else:
+            minutes_per_bar = int(resolution)
+            days_back = int((n_bars * minutes_per_bar) / 1440) * 2 + 5 
+
+        from_time = to_time - (days_back * 86400)
+        history_url = f"{self.tvc_host}/{self.carrier}/{self.time_val}/{self.domain_id}/{self.lang_id}/{self.timezone_id}/history?symbol={symbol}&resolution={resolution}&from={from_time}&to={to_time}"
+        
+        logger.info(f"Pidiendo datos (vía Playwright) a Investing.com de {exchange}:{symbol} (Int: {interval}, Barras: {n_bars})")
+        
         try:
-            resolution = self._map_interval(interval)
-            
-            to_time = int(time.time())
-            
-            # Estimamos cuántos días de historia pedir (UDF requiere from y to en timestamps)
-            multiplier = self._get_multiplier_days(interval)
-            
-            if resolution in ["D", "W", "M"]:
-                days_back = int(n_bars * multiplier) + 10
-            else:
-                # Para minutos, convertimos barras a minutos aprox + margen (dias no laborables)
-                minutes_per_bar = int(resolution)
-                days_back = int((n_bars * minutes_per_bar) / 1440) * 2 + 5 
-
-            from_time = to_time - (days_back * 86400)
-
-            history_url = f"{self.tvc_host}/{self.carrier}/{self.time_val}/{self.domain_id}/{self.lang_id}/{self.timezone_id}/history?symbol={symbol}&resolution={resolution}&from={from_time}&to={to_time}"
-            
-            logger.info(f"Pidiendo datos UDF a Investing.com de {exchange}:{symbol} (Int: {interval}, Barras: {n_bars})")
-            
-            res = self.session.get(history_url, headers=self.headers)
-            
-            if res.status_code == 200:
-                data = res.json()
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                context = await browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                )
+                page = await context.new_page()
+                
+                # Fetch as JSON directly using page.evaluate to bypass cross-origin strictly inside context
+                # OR we just navigate to it since it's a GET request
+                await page.goto(history_url, wait_until="domcontentloaded")
+                json_text = await page.locator("body").inner_text()
+                await browser.close()
+                
+                import json
+                try:
+                    data = json.loads(json_text)
+                except:
+                    logger.error(f"Error parseando JSON de UDF: {json_text[:200]}")
+                    return pd.DataFrame()
+                    
                 if data.get("s") == "ok":
                     df = pd.DataFrame({
                         "datetime": pd.to_datetime(data["t"], unit="s"),
@@ -159,26 +152,22 @@ class InvestingDatafeed:
                     })
                     
                     df.set_index("datetime", inplace=True)
-                    
                     if len(df) > n_bars:
                         df = df.tail(n_bars)
-                        
                     return df
                 elif data.get("s") == "no_data":
-                    logger.warning("UDF retornó no_data. Podría ser fin de semana o fuera de rango de mercado.")
+                    logger.warning("UDF retornó no_data.")
                     return pd.DataFrame()
                 else:
                     logger.error(f"UDF error: {data}")
                     return pd.DataFrame()
-            else:
-                logger.error(f"Error HTTP {res.status_code} al contactar Investing UDF")
-                return pd.DataFrame()
-                
         except Exception as e:
-            logger.error(f"Excepción obteniendo datos UDF: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Excepción Playwright fetching UDF: {e}")
             return pd.DataFrame()
+
+    def get_hist(self, symbol="8830", exchange="COMEX", interval=Interval.in_daily, n_bars=100):
+        # Corre el loop asincrono para mantener la firma sincronica de get_hist()
+        return self._loop.run_until_complete(self._fetch_history_async(symbol, exchange, interval, n_bars))
 
 if __name__ == "__main__":
     tv = InvestingDatafeed()
@@ -189,3 +178,4 @@ if __name__ == "__main__":
     print("\n--- TEST: ORO 1 DIA ---")
     df_1d = tv.get_hist(symbol="8830", exchange="COMEX", interval=Interval.in_daily, n_bars=10)
     print(df_1d)
+
