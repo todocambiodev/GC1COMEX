@@ -2,13 +2,8 @@ import logging
 import time
 import re
 import pandas as pd
-import json
-import asyncio
-import threading
-from datetime import datetime
 from urllib.parse import urlparse, parse_qs
-from playwright.async_api import async_playwright
-from playwright_stealth import Stealth
+from curl_cffi import requests
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
@@ -33,7 +28,7 @@ class Interval:
     in_weekly = "1W"
     in_monthly = "1M"
 
-class InvestingDatafeed:
+class InvestingDatafeedCffi:
     def __init__(self):
         self.tvc_host = None
         self.carrier = None
@@ -41,73 +36,47 @@ class InvestingDatafeed:
         self.domain_id = "1"
         self.lang_id = "1"
         self.timezone_id = "8"
-        self._stealth = Stealth()
-        self._run_async(self._init_session())
+        self.session = requests.Session(impersonate="chrome110")
+        self._init_session()
 
-    def _run_async(self, coro):
-        """Helper robusto para correr tareas asincronas desde hilos sincronos (Flask/Render)."""
-        try:
-            # Intentamos obtener el loop actual (Render suele tener uno activo)
-            loop = asyncio.get_running_loop()
-            
-            # Si hay un loop corriendo, ejecutamos la tarea en un hilo separado
-            # para evitar el error 'Sync API inside asyncio loop'
-            from concurrent.futures import ThreadPoolExecutor
-            def runner():
-                new_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(new_loop)
-                try:
-                    return new_loop.run_until_complete(coro)
-                finally:
-                    new_loop.close()
-            
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                return executor.submit(runner).result()
-        except RuntimeError:
-            # Si no hay loop corriendo (local), usamos asyncio.run directamente
-            return asyncio.run(coro)
-
-    async def _init_session(self):
+    def _init_session(self):
         url = "https://www.investing.com/commodities/gold-streaming-chart"
-        logger.info("Iniciando Playwright Async Stealth para extraer tokens UDF...")
+        logger.info("Iniciando Sesion con curl_cffi (Impersonate Chrome)...")
         
         try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=True, 
-                    args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-setuid-sandbox"]
-                )
-                context = await browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-                )
-                page = await context.new_page()
-                await self._stealth.apply_stealth_async(page)
+            # Headers realistas para evitar 403 inmediatos
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://www.google.com/",
+            }
+            
+            resp = self.session.get(url, headers=headers, timeout=30)
+            
+            if resp.status_code == 403:
+                logger.error("Cloudflare bloqueo curl_cffi (403).")
+                return
+
+            html = resp.text
+            tvc_matches = re.findall(r'https://tvc[^"\']*', html)
+            
+            if tvc_matches:
+                tvc_url = tvc_matches[0].replace('&amp;', '&')
+                parsed = urlparse(tvc_url)
+                qs = parse_qs(parsed.query)
                 
-                # Navegar con 'commit' para ser veloz en Render
-                await page.goto(url, wait_until="commit", timeout=45000)
-                await asyncio.sleep(12) 
-                
-                html = await page.content()
-                tvc_matches = re.findall(r'https://tvc[^"\']*', html)
-                
-                if tvc_matches:
-                    tvc_url = tvc_matches[0].replace('&amp;', '&')
-                    parsed = urlparse(tvc_url)
-                    qs = parse_qs(parsed.query)
-                    
-                    self.tvc_host = f"{parsed.scheme}://{parsed.netloc}"
-                    self.carrier = qs.get("carrier", [""])[0]
-                    self.time_val = qs.get("time", [""])[0]
-                    self.domain_id = qs.get("domain_ID", ["1"])[0]
-                    self.lang_id = qs.get("lang_ID", ["1"])[0]
-                    self.timezone_id = qs.get("timezone_ID", ["8"])[0]
-                    logger.info("InvestingDatafeed: Tokens UDF extraidos (Asincrono).")
-                else:
-                    logger.warning("No se encontraron tokens UDF en la pagina principal.")
-                
-                await browser.close()
+                self.tvc_host = f"{parsed.scheme}://{parsed.netloc}"
+                self.carrier = qs.get("carrier", [""])[0]
+                self.time_val = qs.get("time", [""])[0]
+                self.domain_id = qs.get("domain_ID", ["1"])[0]
+                self.lang_id = qs.get("lang_ID", ["1"])[0]
+                self.timezone_id = qs.get("timezone_ID", ["8"])[0]
+                logger.info("InvestingDatafeedCffi: Tokens UDF extraidos correctamente.")
+            else:
+                logger.warning("No se encontraron tokens UDF con curl_cffi.")
         except Exception as e:
-            logger.error(f"Error en _init_session (Async): {e}")
+            logger.error(f"Error en _init_session (cffi): {e}")
 
     def _map_interval(self, interval):
         mapping = {
@@ -127,9 +96,9 @@ class InvestingDatafeed:
         udf_res = self._map_interval(interval)
         return mapping.get(udf_res, 2)
         
-    async def _get_hist_async(self, symbol, exchange, interval, n_bars):
+    def get_hist(self, symbol="8830", exchange="COMEX", interval=Interval.in_daily, n_bars=100):
         if not self.tvc_host or not self.carrier:
-            await self._init_session()
+            self._init_session()
             
         if not self.tvc_host or not self.carrier:
             return pd.DataFrame()
@@ -148,36 +117,14 @@ class InvestingDatafeed:
         history_url = f"{self.tvc_host}/{self.carrier}/{self.time_val}/{self.domain_id}/{self.lang_id}/{self.timezone_id}/history?symbol={symbol}&resolution={resolution}&from={from_time}&to={to_time}"
         
         try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
-                context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-                page = await context.new_page()
-                await self._stealth.apply_stealth_async(page)
-                
-                await page.goto(history_url, wait_until="domcontentloaded", timeout=40000)
-                json_text = await page.locator("body").inner_text()
-                
-                if "security verification" in json_text or "not a bot" in json_text:
-                    logger.warning("Cloudflare detectado en peticion. Re-intentando sesion completa...")
-                    await browser.close()
-                    await self._init_session()
-                    # Re-generar URL con nuevos tokens si cambiaron
-                    history_url = f"{self.tvc_host}/{self.carrier}/{self.time_val}/{self.domain_id}/{self.lang_id}/{self.timezone_id}/history?symbol={symbol}&resolution={resolution}&from={from_time}&to={to_time}"
-                    async with async_playwright() as p2:
-                        b2 = await p2.chromium.launch(headless=True, args=["--no-sandbox"])
-                        ctx2 = await b2.new_context()
-                        pg2 = await ctx2.new_page()
-                        await self._stealth.apply_stealth_async(pg2)
-                        await pg2.goto(history_url, wait_until="domcontentloaded")
-                        json_text = await pg2.locator("body").inner_text()
-                        await b2.close()
-                else:
-                    await browser.close()
+            resp = self.session.get(history_url, timeout=20)
+            
+            if resp.status_code != 200:
+                logger.warning(f"Error {resp.status_code} al pedir datos. Re-intentando...")
+                self._init_session()
+                resp = self.session.get(history_url, timeout=20)
 
-            if not json_text or "security" in json_text:
-                return pd.DataFrame()
-                
-            data = json.loads(json_text)
+            data = resp.json()
             if data.get("s") == "ok":
                 df = pd.DataFrame({
                     "datetime": pd.to_datetime(data["t"], unit="s"),
@@ -192,20 +139,19 @@ class InvestingDatafeed:
                 return df.tail(n_bars)
             return pd.DataFrame()
         except Exception as e:
-            logger.error(f"Error en _get_hist_async: {e}")
+            logger.error(f"Error en get_hist (cffi): {e}")
             return pd.DataFrame()
 
-    def get_hist(self, symbol="8830", exchange="COMEX", interval=Interval.in_daily, n_bars=100):
-        """Metodo de interfaz sincronica para ser llamado desde Flask/otros scripts."""
-        return self._run_async(self._get_hist_async(symbol, exchange, interval, n_bars))
+    def close(self):
+        pass
 
 if __name__ == "__main__":
-    tv = InvestingDatafeed()
-    print("\n--- TEST: ORO 1 MINUTO ---")
+    tv = InvestingDatafeedCffi()
+    print("\n--- TEST CFFI: ORO 1 MINUTO ---")
     df_1m = tv.get_hist(symbol="8830", exchange="COMEX", interval=Interval.in_1_minute, n_bars=10)
     print(df_1m)
 
-    print("\n--- TEST: ORO 1 DIA ---")
+    print("\n--- TEST CFFI: ORO 1 DIA ---")
     df_1d = tv.get_hist(symbol="8830", exchange="COMEX", interval=Interval.in_daily, n_bars=10)
     print(df_1d)
 
