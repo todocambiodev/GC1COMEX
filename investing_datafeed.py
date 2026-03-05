@@ -3,9 +3,11 @@ import time
 import re
 import pandas as pd
 import json
+import asyncio
+import threading
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
-from playwright.sync_api import sync_playwright
+from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 
 logger = logging.getLogger(__name__)
@@ -40,30 +42,52 @@ class InvestingDatafeed:
         self.lang_id = "1"
         self.timezone_id = "8"
         self._stealth = Stealth()
-        self._init_session()
+        self._run_async(self._init_session())
 
-    def _init_session(self):
+    def _run_async(self, coro):
+        """Helper robusto para correr tareas asincronas desde hilos sincronos (Flask/Render)."""
+        try:
+            # Intentamos obtener el loop actual (Render suele tener uno activo)
+            loop = asyncio.get_running_loop()
+            
+            # Si hay un loop corriendo, ejecutamos la tarea en un hilo separado
+            # para evitar el error 'Sync API inside asyncio loop'
+            from concurrent.futures import ThreadPoolExecutor
+            def runner():
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    return new_loop.run_until_complete(coro)
+                finally:
+                    new_loop.close()
+            
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(runner).result()
+        except RuntimeError:
+            # Si no hay loop corriendo (local), usamos asyncio.run directamente
+            return asyncio.run(coro)
+
+    async def _init_session(self):
         url = "https://www.investing.com/commodities/gold-streaming-chart"
-        logger.info("Iniciando Playwright Stealth para extraer tokens UDF...")
+        logger.info("Iniciando Playwright Async Stealth para extraer tokens UDF...")
         
         try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch(
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
                     headless=True, 
                     args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-setuid-sandbox"]
                 )
-                context = browser.new_context(
+                context = await browser.new_context(
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
                 )
-                page = context.new_page()
-                self._stealth.apply_stealth_sync(page)
+                page = await context.new_page()
+                await self._stealth.apply_stealth_async(page)
                 
-                # Navegar con 'commit' para no esperar a que carguen todos los anuncios pesados
-                # pero esperar tiempo suficiente (15s) para que se generen los tokens UDF
-                page.goto(url, wait_until="commit", timeout=30000)
-                time.sleep(15) 
+                # Navegar con 'commit' para ser veloz en Render
+                await page.goto(url, wait_until="commit", timeout=45000)
+                await asyncio.sleep(12) 
                 
-                html = page.content()
+                html = await page.content()
                 tvc_matches = re.findall(r'https://tvc[^"\']*', html)
                 
                 if tvc_matches:
@@ -77,13 +101,13 @@ class InvestingDatafeed:
                     self.domain_id = qs.get("domain_ID", ["1"])[0]
                     self.lang_id = qs.get("lang_ID", ["1"])[0]
                     self.timezone_id = qs.get("timezone_ID", ["8"])[0]
-                    logger.info("InvestingDatafeed: Tokens UDF extraidos correctamente.")
+                    logger.info("InvestingDatafeed: Tokens UDF extraidos (Asincrono).")
                 else:
-                    logger.warning("No se encontraron tokens UDF. Cloudflare bloqueando la pagina principal.")
+                    logger.warning("No se encontraron tokens UDF en la pagina principal.")
                 
-                browser.close()
+                await browser.close()
         except Exception as e:
-            logger.error(f"Error en _init_session: {e}")
+            logger.error(f"Error en _init_session (Async): {e}")
 
     def _map_interval(self, interval):
         mapping = {
@@ -103,12 +127,11 @@ class InvestingDatafeed:
         udf_res = self._map_interval(interval)
         return mapping.get(udf_res, 2)
         
-    def get_hist(self, symbol="8830", exchange="COMEX", interval=Interval.in_daily, n_bars=100):
+    async def _get_hist_async(self, symbol, exchange, interval, n_bars):
         if not self.tvc_host or not self.carrier:
-            self._init_session()
+            await self._init_session()
             
         if not self.tvc_host or not self.carrier:
-            logger.error("Tokens UDF no disponibles.")
             return pd.DataFrame()
 
         resolution = self._map_interval(interval)
@@ -125,46 +148,36 @@ class InvestingDatafeed:
         history_url = f"{self.tvc_host}/{self.carrier}/{self.time_val}/{self.domain_id}/{self.lang_id}/{self.timezone_id}/history?symbol={symbol}&resolution={resolution}&from={from_time}&to={to_time}"
         
         try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
-                page = browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-                self._stealth.apply_stealth_sync(page)
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
+                context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                page = await context.new_page()
+                await self._stealth.apply_stealth_async(page)
                 
-                page.goto(history_url, wait_until="domcontentloaded", timeout=30000)
-                json_text = page.locator("body").inner_text()
+                await page.goto(history_url, wait_until="domcontentloaded", timeout=40000)
+                json_text = await page.locator("body").inner_text()
                 
-                # Deteccion de Cloudflare en la respuesta
                 if "security verification" in json_text or "not a bot" in json_text:
-                    logger.warning("Cloudflare detectado en peticion de datos. Reintentando...")
-                    browser.close()
-                    # Forzar reinicio de sesion para obtener nuevos tokens y cookies
-                    self._init_session()
-                    if not self.tvc_host or not self.carrier:
-                        return pd.DataFrame()
-                        
-                    # Segundo intento
-                    with sync_playwright() as p2:
-                        browser2 = p2.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
-                        page2 = browser2.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-                        self._stealth.apply_stealth_sync(page2)
-                        
-                        history_url_fixed = f"{self.tvc_host}/{self.carrier}/{self.time_val}/{self.domain_id}/{self.lang_id}/{self.timezone_id}/history?symbol={symbol}&resolution={resolution}&from={from_time}&to={to_time}"
-                        page2.goto(history_url_fixed, wait_until="domcontentloaded")
-                        json_text = page2.locator("body").inner_text()
-                        browser2.close()
-
+                    logger.warning("Cloudflare detectado en peticion. Re-intentando sesion completa...")
+                    await browser.close()
+                    await self._init_session()
+                    # Re-generar URL con nuevos tokens si cambiaron
+                    history_url = f"{self.tvc_host}/{self.carrier}/{self.time_val}/{self.domain_id}/{self.lang_id}/{self.timezone_id}/history?symbol={symbol}&resolution={resolution}&from={from_time}&to={to_time}"
+                    async with async_playwright() as p2:
+                        b2 = await p2.chromium.launch(headless=True, args=["--no-sandbox"])
+                        ctx2 = await b2.new_context()
+                        pg2 = await ctx2.new_page()
+                        await self._stealth.apply_stealth_async(pg2)
+                        await pg2.goto(history_url, wait_until="domcontentloaded")
+                        json_text = await pg2.locator("body").inner_text()
+                        await b2.close()
                 else:
-                    browser.close()
+                    await browser.close()
 
             if not json_text or "security" in json_text:
                 return pd.DataFrame()
                 
-            try:
-                data = json.loads(json_text)
-            except:
-                logger.error(f"Error parseando JSON: {str(json_text)[:100]}...")
-                return pd.DataFrame()
-                
+            data = json.loads(json_text)
             if data.get("s") == "ok":
                 df = pd.DataFrame({
                     "datetime": pd.to_datetime(data["t"], unit="s"),
@@ -179,8 +192,12 @@ class InvestingDatafeed:
                 return df.tail(n_bars)
             return pd.DataFrame()
         except Exception as e:
-            logger.error(f"Error en get_hist (Playwright): {e}")
+            logger.error(f"Error en _get_hist_async: {e}")
             return pd.DataFrame()
+
+    def get_hist(self, symbol="8830", exchange="COMEX", interval=Interval.in_daily, n_bars=100):
+        """Metodo de interfaz sincronica para ser llamado desde Flask/otros scripts."""
+        return self._run_async(self._get_hist_async(symbol, exchange, interval, n_bars))
 
 if __name__ == "__main__":
     tv = InvestingDatafeed()
