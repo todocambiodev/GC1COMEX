@@ -36,26 +36,39 @@ class InvestingDatafeed:
         self.domain_id = "1"
         self.lang_id = "1"
         self.timezone_id = "8"
-        self.session = requests.Session(impersonate="chrome110")
+        # Usamos chrome120 para maxima compatibilidad actual
+        self.session = requests.Session(impersonate="chrome120")
         self._init_session()
+
+    def _get_base_headers(self):
+        return {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+        }
 
     def _init_session(self):
         url = "https://www.investing.com/commodities/gold-streaming-chart"
-        logger.info("Iniciando Sesion con curl_cffi (Impersonate Chrome)...")
+        logger.info("Iniciando Sesion con curl_cffi (Chrome 120)...")
         
         try:
-            # Headers realistas para evitar 403 inmediatos
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Referer": "https://www.google.com/",
-            }
+            # Re-crear sesion si es necesario para limpiar huellas viejas
+            self.session = requests.Session(impersonate="chrome120")
+            headers = self._get_base_headers()
+            headers["Referer"] = "https://www.google.com/"
             
             resp = self.session.get(url, headers=headers, timeout=30)
             
             if resp.status_code == 403:
-                logger.error("Cloudflare bloqueo curl_cffi (403).")
+                logger.error("Cloudflare bloqueo curl_cffi (403). Render detectado.")
                 return
 
             html = resp.text
@@ -72,9 +85,9 @@ class InvestingDatafeed:
                 self.domain_id = qs.get("domain_ID", ["1"])[0]
                 self.lang_id = qs.get("lang_ID", ["1"])[0]
                 self.timezone_id = qs.get("timezone_ID", ["8"])[0]
-                logger.info("InvestingDatafeedCffi: Tokens UDF extraidos correctamente.")
+                logger.info("InvestingDatafeed: Tokens UDF extraidos correctamente (CFFI-120).")
             else:
-                logger.warning("No se encontraron tokens UDF con curl_cffi.")
+                logger.warning("No se encontraron tokens UDF. Cloudflare podria estar mostrando un desafio JS.")
         except Exception as e:
             logger.error(f"Error en _init_session (cffi): {e}")
 
@@ -117,12 +130,27 @@ class InvestingDatafeed:
         history_url = f"{self.tvc_host}/{self.carrier}/{self.time_val}/{self.domain_id}/{self.lang_id}/{self.timezone_id}/history?symbol={symbol}&resolution={resolution}&from={from_time}&to={to_time}"
         
         try:
-            resp = self.session.get(history_url, timeout=20)
+            # Headers especificos para peticion de datos (XHR)
+            headers = self._get_base_headers()
+            headers.update({
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-site",
+                "X-Requested-With": "XMLHttpRequest"
+            })
+            
+            resp = self.session.get(history_url, headers=headers, timeout=20)
             
             if resp.status_code != 200:
-                logger.warning(f"Error {resp.status_code} al pedir datos. Re-intentando...")
+                logger.warning(f"Error {resp.status_code} al pedir datos. Re-intentando sesion completa...")
                 self._init_session()
-                resp = self.session.get(history_url, timeout=20)
+                # Re-intentar con los nuevos tokens
+                history_url = f"{self.tvc_host}/{self.carrier}/{self.time_val}/{self.domain_id}/{self.lang_id}/{self.timezone_id}/history?symbol={symbol}&resolution={resolution}&from={from_time}&to={to_time}"
+                resp = self.session.get(history_url, headers=headers, timeout=20)
+
+            if resp.status_code != 200:
+                return pd.DataFrame()
 
             data = resp.json()
             if data.get("s") == "ok":
@@ -154,4 +182,3 @@ if __name__ == "__main__":
     print("\n--- TEST CFFI: ORO 1 DIA ---")
     df_1d = tv.get_hist(symbol="8830", exchange="COMEX", interval=Interval.in_daily, n_bars=10)
     print(df_1d)
-
