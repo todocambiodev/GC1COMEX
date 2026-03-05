@@ -7,3 +7,4 @@ requests
 openai
 playwright
 python-dotenv
+curl_cffi
