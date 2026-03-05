@@ -2,9 +2,11 @@ import logging
 import time
 import re
 import pandas as pd
+import json
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
 from playwright.sync_api import sync_playwright
+from playwright_stealth import Stealth
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
@@ -37,15 +39,15 @@ class InvestingDatafeed:
         self.domain_id = "1"
         self.lang_id = "1"
         self.timezone_id = "8"
+        self._stealth = Stealth()
         self._init_session()
 
     def _init_session(self):
         url = "https://www.investing.com/commodities/gold-streaming-chart"
-        logger.info("Iniciando Playwright para evadir Cloudflare y extraer tokens UDF...")
+        logger.info("Iniciando Playwright Stealth para extraer tokens UDF...")
         
         try:
             with sync_playwright() as p:
-                # --no-sandbox es vital en entornos de servidor como Render/Docker
                 browser = p.chromium.launch(
                     headless=True, 
                     args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-setuid-sandbox"]
@@ -54,9 +56,12 @@ class InvestingDatafeed:
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
                 )
                 page = context.new_page()
+                self._stealth.apply_stealth_sync(page)
                 
-                page.goto(url, wait_until="domcontentloaded")
-                time.sleep(3) # Damos margen para que Cloudflare termine su validación
+                # Navegar con 'commit' para no esperar a que carguen todos los anuncios pesados
+                # pero esperar tiempo suficiente (15s) para que se generen los tokens UDF
+                page.goto(url, wait_until="commit", timeout=30000)
+                time.sleep(15) 
                 
                 html = page.content()
                 tvc_matches = re.findall(r'https://tvc[^"\']*', html)
@@ -72,13 +77,13 @@ class InvestingDatafeed:
                     self.domain_id = qs.get("domain_ID", ["1"])[0]
                     self.lang_id = qs.get("lang_ID", ["1"])[0]
                     self.timezone_id = qs.get("timezone_ID", ["8"])[0]
-                    logger.info("InvestingDatafeed sesión UDF iniciada exitosamente con Playwright (sincrono).")
+                    logger.info("InvestingDatafeed: Tokens UDF extraidos correctamente.")
                 else:
-                    logger.warning("No se pudo extraer el token UDF. Posible bloqueo o Captcha visible.")
+                    logger.warning("No se encontraron tokens UDF. Cloudflare bloqueando la pagina principal.")
                 
                 browser.close()
         except Exception as e:
-            logger.error(f"Excepción en _init_session: {e}")
+            logger.error(f"Error en _init_session: {e}")
 
     def _map_interval(self, interval):
         mapping = {
@@ -99,13 +104,11 @@ class InvestingDatafeed:
         return mapping.get(udf_res, 2)
         
     def get_hist(self, symbol="8830", exchange="COMEX", interval=Interval.in_daily, n_bars=100):
-        # Si la sesión no inicializó bien al principio (común en Render por arranques frios), reintentamos en caliente.
         if not self.tvc_host or not self.carrier:
-            logger.info("La sesión UDF no estaba lista. Intentando reinicializar en la peticion de datos...")
             self._init_session()
             
         if not self.tvc_host or not self.carrier:
-            logger.error("Error definitivo: La sesión UDF no pudo ser inicializada.")
+            logger.error("Tokens UDF no disponibles.")
             return pd.DataFrame()
 
         resolution = self._map_interval(interval)
@@ -121,55 +124,62 @@ class InvestingDatafeed:
         from_time = to_time - (days_back * 86400)
         history_url = f"{self.tvc_host}/{self.carrier}/{self.time_val}/{self.domain_id}/{self.lang_id}/{self.timezone_id}/history?symbol={symbol}&resolution={resolution}&from={from_time}&to={to_time}"
         
-        logger.info(f"Pidiendo datos (Playwright) a Investing.com de {exchange}:{symbol} (Int: {interval}, Barras: {n_bars})")
-        
         try:
             with sync_playwright() as p:
-                # --no-sandbox / --disable-setuid-sandbox es esencial en contenedores
-                browser = p.chromium.launch(
-                    headless=True,
-                    args=["--no-sandbox", "--disable-setuid-sandbox"]
-                )
-                context = browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-                )
-                page = context.new_page()
+                browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
+                page = browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                self._stealth.apply_stealth_sync(page)
                 
-                # Fetch as JSON directly using pure page navigation (Safe around CORS)
-                page.goto(history_url, wait_until="domcontentloaded")
+                page.goto(history_url, wait_until="domcontentloaded", timeout=30000)
                 json_text = page.locator("body").inner_text()
-                browser.close()
                 
-                import json
-                try:
-                    data = json.loads(json_text)
-                except:
-                    logger.error(f"Error parseando JSON de UDF: {str(json_text)[:200]}")
-                    return pd.DataFrame()
-                    
-                if data.get("s") == "ok":
-                    df = pd.DataFrame({
-                        "datetime": pd.to_datetime(data["t"], unit="s"),
-                        "symbol": f"{exchange}:{symbol}",
-                        "open": data["o"],
-                        "high": data["h"],
-                        "low": data["l"],
-                        "close": data["c"],
-                        "volume": data.get("v", [0]*len(data["t"]))
-                    })
-                    
-                    df.set_index("datetime", inplace=True)
-                    if len(df) > n_bars:
-                        df = df.tail(n_bars)
-                    return df
-                elif data.get("s") == "no_data":
-                    logger.warning("UDF retornó no_data.")
-                    return pd.DataFrame()
+                # Deteccion de Cloudflare en la respuesta
+                if "security verification" in json_text or "not a bot" in json_text:
+                    logger.warning("Cloudflare detectado en peticion de datos. Reintentando...")
+                    browser.close()
+                    # Forzar reinicio de sesion para obtener nuevos tokens y cookies
+                    self._init_session()
+                    if not self.tvc_host or not self.carrier:
+                        return pd.DataFrame()
+                        
+                    # Segundo intento
+                    with sync_playwright() as p2:
+                        browser2 = p2.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
+                        page2 = browser2.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                        self._stealth.apply_stealth_sync(page2)
+                        
+                        history_url_fixed = f"{self.tvc_host}/{self.carrier}/{self.time_val}/{self.domain_id}/{self.lang_id}/{self.timezone_id}/history?symbol={symbol}&resolution={resolution}&from={from_time}&to={to_time}"
+                        page2.goto(history_url_fixed, wait_until="domcontentloaded")
+                        json_text = page2.locator("body").inner_text()
+                        browser2.close()
+
                 else:
-                    logger.error(f"UDF error: {data}")
-                    return pd.DataFrame()
+                    browser.close()
+
+            if not json_text or "security" in json_text:
+                return pd.DataFrame()
+                
+            try:
+                data = json.loads(json_text)
+            except:
+                logger.error(f"Error parseando JSON: {str(json_text)[:100]}...")
+                return pd.DataFrame()
+                
+            if data.get("s") == "ok":
+                df = pd.DataFrame({
+                    "datetime": pd.to_datetime(data["t"], unit="s"),
+                    "symbol": f"{exchange}:{symbol}",
+                    "open": data["o"],
+                    "high": data["h"],
+                    "low": data["l"],
+                    "close": data["c"],
+                    "volume": data.get("v", [0]*len(data["t"]))
+                })
+                df.set_index("datetime", inplace=True)
+                return df.tail(n_bars)
+            return pd.DataFrame()
         except Exception as e:
-            logger.error(f"Excepción Playwright fetching UDF: {e}")
+            logger.error(f"Error en get_hist (Playwright): {e}")
             return pd.DataFrame()
 
 if __name__ == "__main__":
@@ -177,7 +187,7 @@ if __name__ == "__main__":
     print("\n--- TEST: ORO 1 MINUTO ---")
     df_1m = tv.get_hist(symbol="8830", exchange="COMEX", interval=Interval.in_1_minute, n_bars=10)
     print(df_1m)
-    
+
     print("\n--- TEST: ORO 1 DIA ---")
     df_1d = tv.get_hist(symbol="8830", exchange="COMEX", interval=Interval.in_daily, n_bars=10)
     print(df_1d)
