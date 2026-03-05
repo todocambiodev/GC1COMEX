@@ -31,12 +31,8 @@ class Interval:
 
 class InvestingDatafeed:
     def __init__(self):
-        self.session = requests.Session(impersonate="chrome120")
-        self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-            "Referer": "https://www.investing.com/"
-        }
+        self.session = None
+        self.headers = {}
         self.tvc_host = None
         self.carrier = None
         self.time_val = None
@@ -46,31 +42,52 @@ class InvestingDatafeed:
         self._init_session()
 
     def _init_session(self):
-        # Fetch the streaming chart page to extract the UDF carrier and time tokens
+        # Opciones de navegadores para burlar Cloudflare en servidores (Data Centers / Render / Github)
+        # Es clave dejar que curl_cffi asigne el User-Agent automáticamente para que coincida con la huella TLS.
+        impersonate_targets = ["chrome120", "chrome110", "safari15_5", "safari15_3", "edge101", "edge99"]
+        
         url = "https://www.investing.com/commodities/gold-streaming-chart"
-        try:
-            res = self.session.get(url, headers=self.headers)
-            if res.status_code == 200:
-                html = res.text
-                tvc_matches = re.findall(r'https://tvc[^"\']*', html)
-                if tvc_matches:
-                    tvc_url = tvc_matches[0].replace('&amp;', '&')
-                    parsed = urlparse(tvc_url)
-                    qs = parse_qs(parsed.query)
-                    
-                    self.tvc_host = f"{parsed.scheme}://{parsed.netloc}"
-                    self.carrier = qs.get("carrier", [""])[0]
-                    self.time_val = qs.get("time", [""])[0]
-                    self.domain_id = qs.get("domain_ID", ["1"])[0]
-                    self.lang_id = qs.get("lang_ID", ["1"])[0]
-                    self.timezone_id = qs.get("timezone_ID", ["8"])[0]
-                    logger.info("InvestingDatafeed sesión UDF iniciada (Tokens actualizados).")
+        
+        for target in impersonate_targets:
+            try:
+                # Creamos una sesión nueva para cada intento
+                self.session = requests.Session(impersonate=target)
+                
+                # Solo añadimos Referer. ¡NO forzar el User-Agent! curl_cffi lo pondrá automático para emparejar el TLS.
+                self.headers = {
+                    "Referer": "https://www.investing.com/"
+                }
+                
+                logger.info(f"Probando conexión con Investing.com usando perfil: {target}...")
+                res = self.session.get(url, headers=self.headers, timeout=15)
+                
+                if res.status_code == 200:
+                    html = res.text
+                    tvc_matches = re.findall(r'https://tvc[^"\']*', html)
+                    if tvc_matches:
+                        tvc_url = tvc_matches[0].replace('&amp;', '&')
+                        parsed = urlparse(tvc_url)
+                        qs = parse_qs(parsed.query)
+                        
+                        self.tvc_host = f"{parsed.scheme}://{parsed.netloc}"
+                        self.carrier = qs.get("carrier", [""])[0]
+                        self.time_val = qs.get("time", [""])[0]
+                        self.domain_id = qs.get("domain_ID", ["1"])[0]
+                        self.lang_id = qs.get("lang_ID", ["1"])[0]
+                        self.timezone_id = qs.get("timezone_ID", ["8"])[0]
+                        logger.info(f"InvestingDatafeed sesión UDF iniciada exitosamente con perfil {target}.")
+                        return # Éxito, salimos del bucle
+                    else:
+                        logger.warning(f"Perfil {target} conectó pero no extrajo TVC URL. Posible Captcha.")
                 else:
-                    logger.error("No se pudo extraer la URL TVC del DOM.")
-            else:
-                logger.error(f"Error {res.status_code} al inicializar sesión en Investing.com")
-        except Exception as e:
-            logger.error(f"Error _init_session: {e}")
+                    logger.warning(f"Error {res.status_code} al inicializar sesión con {target}. Reintentando...")
+                    
+            except Exception as e:
+                logger.warning(f"Excepción inicializando sesión con {target}: {e}")
+                
+            time.sleep(1.5) # Pausa entre intentos
+            
+        logger.error("No se pudo iniciar sesión en Investing.com después de intentar todos los perfiles TLS disponibles. Block 403 persistente.")
 
     def _map_interval(self, interval):
         # Mapear intervalos de tvDatafeed a resoluciones UDF de Investing.com
