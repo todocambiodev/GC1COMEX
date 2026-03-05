@@ -146,7 +146,7 @@ class InvestingDatafeed:
         pass
 
 if __name__ == "__main__":
-    tv = InvestingDatafeedCffi()
+    tv = InvestingDatafeed()
     print("\n--- TEST CFFI: ORO 1 MINUTO ---")
     df_1m = tv.get_hist(symbol="8830", exchange="COMEX", interval=Interval.in_1_minute, n_bars=10)
     print(df_1m)
