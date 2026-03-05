@@ -1,11 +1,10 @@
 import logging
-import asyncio
 import time
 import re
 import pandas as pd
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
-from playwright.async_api import async_playwright
+from playwright.sync_api import sync_playwright
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
@@ -38,28 +37,28 @@ class InvestingDatafeed:
         self.domain_id = "1"
         self.lang_id = "1"
         self.timezone_id = "8"
-        self._loop = asyncio.new_event_loop()
-        self._loop.run_until_complete(self._init_session_async())
+        self._init_session()
 
-    async def _init_session_async(self):
+    def _init_session(self):
         url = "https://www.investing.com/commodities/gold-streaming-chart"
         logger.info("Iniciando Playwright para evadir Cloudflare y extraer tokens UDF...")
         
         try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(
+            with sync_playwright() as p:
+                # --no-sandbox es vital en entornos de servidor como Render/Docker
+                browser = p.chromium.launch(
                     headless=True, 
-                    args=["--disable-blink-features=AutomationControlled"]
+                    args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-setuid-sandbox"]
                 )
-                context = await browser.new_context(
+                context = browser.new_context(
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
                 )
-                page = await context.new_page()
+                page = context.new_page()
                 
-                await page.goto(url, wait_until="domcontentloaded")
-                await page.wait_for_timeout(3000)
+                page.goto(url, wait_until="domcontentloaded")
+                time.sleep(3) # Damos margen para que Cloudflare termine su validación
                 
-                html = await page.content()
+                html = page.content()
                 tvc_matches = re.findall(r'https://tvc[^"\']*', html)
                 
                 if tvc_matches:
@@ -73,13 +72,13 @@ class InvestingDatafeed:
                     self.domain_id = qs.get("domain_ID", ["1"])[0]
                     self.lang_id = qs.get("lang_ID", ["1"])[0]
                     self.timezone_id = qs.get("timezone_ID", ["8"])[0]
-                    logger.info("InvestingDatafeed sesión UDF iniciada exitosamente con Playwright.")
+                    logger.info("InvestingDatafeed sesión UDF iniciada exitosamente con Playwright (sincrono).")
                 else:
                     logger.warning("No se pudo extraer el token UDF. Posible bloqueo o Captcha visible.")
                 
-                await browser.close()
+                browser.close()
         except Exception as e:
-            logger.error(f"Excepción en _init_session_async: {e}")
+            logger.error(f"Excepción en _init_session: {e}")
 
     def _map_interval(self, interval):
         mapping = {
@@ -99,9 +98,14 @@ class InvestingDatafeed:
         udf_res = self._map_interval(interval)
         return mapping.get(udf_res, 2)
         
-    async def _fetch_history_async(self, symbol, exchange, interval, n_bars):
+    def get_hist(self, symbol="8830", exchange="COMEX", interval=Interval.in_daily, n_bars=100):
+        # Si la sesión no inicializó bien al principio (común en Render por arranques frios), reintentamos en caliente.
         if not self.tvc_host or not self.carrier:
-            logger.error("La sesión UDF no está lista.")
+            logger.info("La sesión UDF no estaba lista. Intentando reinicializar en la peticion de datos...")
+            self._init_session()
+            
+        if not self.tvc_host or not self.carrier:
+            logger.error("Error definitivo: La sesión UDF no pudo ser inicializada.")
             return pd.DataFrame()
 
         resolution = self._map_interval(interval)
@@ -117,27 +121,30 @@ class InvestingDatafeed:
         from_time = to_time - (days_back * 86400)
         history_url = f"{self.tvc_host}/{self.carrier}/{self.time_val}/{self.domain_id}/{self.lang_id}/{self.timezone_id}/history?symbol={symbol}&resolution={resolution}&from={from_time}&to={to_time}"
         
-        logger.info(f"Pidiendo datos (vía Playwright) a Investing.com de {exchange}:{symbol} (Int: {interval}, Barras: {n_bars})")
+        logger.info(f"Pidiendo datos (Playwright) a Investing.com de {exchange}:{symbol} (Int: {interval}, Barras: {n_bars})")
         
         try:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                context = await browser.new_context(
+            with sync_playwright() as p:
+                # --no-sandbox / --disable-setuid-sandbox es esencial en contenedores
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=["--no-sandbox", "--disable-setuid-sandbox"]
+                )
+                context = browser.new_context(
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
                 )
-                page = await context.new_page()
+                page = context.new_page()
                 
-                # Fetch as JSON directly using page.evaluate to bypass cross-origin strictly inside context
-                # OR we just navigate to it since it's a GET request
-                await page.goto(history_url, wait_until="domcontentloaded")
-                json_text = await page.locator("body").inner_text()
-                await browser.close()
+                # Fetch as JSON directly using pure page navigation (Safe around CORS)
+                page.goto(history_url, wait_until="domcontentloaded")
+                json_text = page.locator("body").inner_text()
+                browser.close()
                 
                 import json
                 try:
                     data = json.loads(json_text)
                 except:
-                    logger.error(f"Error parseando JSON de UDF: {json_text[:200]}")
+                    logger.error(f"Error parseando JSON de UDF: {str(json_text)[:200]}")
                     return pd.DataFrame()
                     
                 if data.get("s") == "ok":
@@ -164,10 +171,6 @@ class InvestingDatafeed:
         except Exception as e:
             logger.error(f"Excepción Playwright fetching UDF: {e}")
             return pd.DataFrame()
-
-    def get_hist(self, symbol="8830", exchange="COMEX", interval=Interval.in_daily, n_bars=100):
-        # Corre el loop asincrono para mantener la firma sincronica de get_hist()
-        return self._loop.run_until_complete(self._fetch_history_async(symbol, exchange, interval, n_bars))
 
 if __name__ == "__main__":
     tv = InvestingDatafeed()
