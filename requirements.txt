@@ -9,3 +9,4 @@ playwright
 python-dotenv
 cloudscraper
 curl_cffi
+playwright-stealth
