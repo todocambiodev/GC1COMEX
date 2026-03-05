@@ -28,7 +28,7 @@ class Interval:
     in_weekly = "1W"
     in_monthly = "1M"
 
-class InvestingDatafeedCffi:
+class InvestingDatafeed:
     def __init__(self):
         self.tvc_host = None
         self.carrier = None
