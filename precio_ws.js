@@ -139,13 +139,17 @@ async function main() {
     // Volver a cargar los datos:
     setInterval(async () => {
         await obtenerSR("sr")
-        if (precio != "") await enviarPrecio(url, precio)
         cicloActual++
         if (cicloActual >= cicloFinal) {
             console.log("✅ Proceso finalizado.")
             process.exit()
         }
     }, minutosParaRecargarSR * 60 * 1000)
+
+    // Enviar precio actual
+    setInterval(async () => {
+        if (precio != "") await enviarPrecio(url, precio)
+    }, segundosParaEnviarPrecioActual * 1000)
 }
 // ---------------------
 
@@ -157,7 +161,8 @@ let resistencias = []
 let sopActuales = []
 let resActuales = []
 const factor = 1.00126
-const minutosParaRecargarSR = 1/9
+const minutosParaRecargarSR = 1
+const segundosParaEnviarPrecioActual = 3.69
 const cicloFinal = 18*9
 let cicloActual = 0
 let precio = ""
