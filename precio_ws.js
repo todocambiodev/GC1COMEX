@@ -123,8 +123,8 @@ function arraysSonIguales(arr1, arr2) {
 }
 
 async function enviarPrecio(url, precio) {
-    url += `?verificarSR=${precio}`
     console.log("Enviando precio: ", precio)
+    url += `?verificarSR=${precio}`
     const respuesta = await fetch(url, {method: "POST"})
     console.log(await respuesta.text())
 }
