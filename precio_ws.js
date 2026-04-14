@@ -1,46 +1,123 @@
-import { chromium } from "playwright"
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+
+// Usar el plugin de stealth
+puppeteer.use(StealthPlugin());
 
 // Funciones principales:
 // ---------------------
 async function precioRealTime() {
     const url = "https://www.investing.com/commodities/gold";
     const priceSelector = '[data-test="instrument-price-last"]';
+    let retryCount = 0;
+    const maxRetries = 5;
+
     while (true) {
         console.log(`\n[${new Date().toLocaleTimeString()}] Iniciando nueva sesión del navegador...`);
         let browser;
         try {
-            browser = await chromium.launch({ headless: true });
-            const context = await browser.newContext({
-                userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                viewport: { width: 1280, height: 720 }
+            browser = await puppeteer.launch({
+                headless: 'new',
+                args: [
+                    '--no-first-run',
+                    '--no-default-browser-check',
+                    '--disable-default-apps',
+                    '--disable-popup-blocking',
+                    '--disable-prompt-on-repost',
+                    '--disable-background-networking',
+                    '--disable-client-side-phishing-detection',
+                    '--disable-default-apps',
+                    '--disable-hang-monitor',
+                    '--disable-popup-blocking',
+                    '--disable-prompt-on-repost',
+                    '--disable-sync',
+                    '--enable-automation=false',
+                ],
+                defaultViewport: {
+                    width: 1920,
+                    height: 1080
+                }
             });
-            const page = await context.newPage();
+
+            const page = await browser.newPage();
+
+            // Configurar headers más realistas
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0');
+            
+            await page.setViewport({
+                width: 1920,
+                height: 1080,
+                deviceScaleFactor: 1
+            });
+
+            await page.setExtraHTTPHeaders({
+                'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Cache-Control': 'max-age=0',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1'
+            });
 
             // Exponer función para recibir actualizaciones desde el navegador
-            await page.exposeFunction('onPriceChange', (newPrice) => {
-                console.log(`✅ [${new Date().toLocaleTimeString()}] Oro: ${newPrice}`);
-                verificarSR(newPrice);
-                precio = newPrice.replace(",", "");
+            page.on('console', msg => {
+                if (msg.type() === 'log' && msg.text().includes('PRECIO:')) {
+                    const newPrice = msg.text().replace('PRECIO:', '').trim();
+                    console.log(`✅ [${new Date().toLocaleTimeString()}] Oro: ${newPrice}`);
+                    verificarSR(newPrice);
+                    precio = newPrice.replace(",", "");
+                    retryCount = 0;
+                }
             });
 
             console.log(`Navegando a ${url}...`);
-            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 63000 });
+            
+            // Navegar con espera más agresiva
+            await page.goto(url, {
+                waitUntil: ['domcontentloaded', 'networkidle0'],
+                timeout: 90000
+            });
+
+            // Esperar a que Cloudflare se resuelva
+            console.log("Esperando resolución de Cloudflare...");
+            await page.waitForTimeout(5000);
+
+            // Validar que la página cargó correctamente
+            const isBlocked = await page.evaluate(() => {
+                return document.body.textContent.includes('Challenge');
+            });
+
+            if (isBlocked) {
+                throw new Error("Cloudflare sigue bloqueando la página");
+            }
 
             console.log("Esperando selector de precio...");
-            await page.waitForSelector(priceSelector, { timeout: 15000 });
+            await page.waitForSelector(priceSelector, { timeout: 20000 }).catch(() => {
+                throw new Error("Precio selector no encontrado");
+            });
 
-            const initialPrice = await page.textContent(priceSelector);
+            const initialPrice = await page.$eval(priceSelector, el => el.textContent.trim());
             console.log(`Precio inicial encontrado: ${initialPrice}`);
-            console.log("Escuchando cambios en tiempo real (MutationObserver activo)...");
+            console.log("Escuchando cambios en tiempo real...");
 
-            // Inyectar MutationObserver en la página
+            // Inyectar MutationObserver
             await page.evaluate((selector) => {
                 const targetNode = document.querySelector(selector);
                 if (!targetNode) return;
 
+                // Rastrear el precio anterior para detectar cambios
+                let previousPrice = targetNode.textContent.trim();
+                console.log(`PRECIO:${previousPrice}`);
+
                 const observer = new MutationObserver(() => {
                     const price = targetNode.textContent.trim();
-                    window.onPriceChange(price);
+                    if (price && price !== previousPrice) {
+                        previousPrice = price;
+                        console.log(`PRECIO:${price}`);
+                    }
                 });
 
                 observer.observe(targetNode, {
@@ -50,15 +127,31 @@ async function precioRealTime() {
                 });
             }, priceSelector);
 
-            // Mantener la página abierta indefinidamente. 
-            // Si el navegador se cierra o falla, el catch reiniciará el loop.
-            await page.waitForEvent('close', { timeout: 0 });
+            // Mantener la página abierta
+            await new Promise(() => {}); // Never resolve
 
         } catch (error) {
+            retryCount++;
             console.error(`⚠️ [Error]: ${error.message}`);
-            console.log("Reintentando en 10 segundos...");
-            if (browser) await browser.close().catch(() => { });
-            await new Promise(resolve => setTimeout(resolve, 10000));
+            console.log(`Reintentos: ${retryCount}/${maxRetries}`);
+
+            if (browser) {
+                try {
+                    await browser.close();
+                } catch (e) {
+                    console.error("Error al cerrar navegador:", e.message);
+                }
+            }
+
+            if (retryCount >= maxRetries) {
+                console.log("Máximo de reintentos alcanzado, esperando 60 segundos...");
+                retryCount = 0;
+                await new Promise(resolve => setTimeout(resolve, 60000));
+            } else {
+                const waitTime = (retryCount * 8 + 15) * 1000;
+                console.log(`Reintentando en ${waitTime / 1000} segundos...`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+            }
         }
     }
 }
@@ -131,25 +224,30 @@ async function enviarPrecio(url, precio) {
 
 async function main() {
 
-    Promise.all([
-        precioRealTime(),
-        obtenerSR("sr")
-    ])
+    try {
+        await Promise.all([
+            precioRealTime(),
+            obtenerSR("sr")
+        ]);
+    } catch (error) {
+        console.error("Error en main:", error);
+        process.exit(1);
+    }
 
     // Volver a cargar los datos:
     setInterval(async () => {
-        await obtenerSR("sr")
-        cicloActual++
+        await obtenerSR("sr");
+        cicloActual++;
         if (cicloActual >= cicloFinal) {
-            console.log("✅ Proceso finalizado.")
-            process.exit()
+            console.log("✅ Proceso finalizado.");
+            process.exit(0);
         }
-    }, minutosParaRecargarSR * 60 * 1000)
+    }, minutosParaRecargarSR * 60 * 1000);
 
     // Enviar precio actual
     setInterval(async () => {
-        if (precio != "") await enviarPrecio(url, precio)
-    }, segundosParaEnviarPrecioActual * 1000)
+        if (precio != "") await enviarPrecio(url, precio);
+    }, segundosParaEnviarPrecioActual * 1000);
 }
 // ---------------------
 
@@ -172,3 +270,4 @@ let precio = ""
 // ---------------------
 main()
 // ---------------------
+
